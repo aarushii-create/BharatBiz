@@ -1,0 +1,6 @@
+{
+  "name": "BharatBiz AI",
+  "description": "Multilingual, voice-first AI business decision assistant for India's small businesses. Voice to data to evidence to decision to approval to action.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
