@@ -357,7 +357,7 @@ BharatBiz/
 | Name | GitHub |
 |---|---|
 | Aarushi Sharma | [@aarushii-create](https://github.com/aarushii-create) |
-| Yojitha Boyina  | *(handle)* |
+| Yojitha Boyina  | [@yojithaboyina29-ship-it]() |
 
 
 
