@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: bharatbiz-ai
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build:prod
+    startCommand: npm run start:prod
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 4000
+      - key: APP_URL
+        value: https://your-app-name.example.com
+      - key: FRONTEND_URL
+        value: https://your-app-name.example.com
+      - key: CORS_ORIGIN
+        value: https://your-app-name.example.com
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: BB_DATA_PATH
+        value: ./data/bharatbiz-data.json
+      - key: DATA_DIR
+        value: ./data
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 60000
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: 120
+      - key: REQUEST_TIMEOUT_MS
+        value: 25000
+      - key: LLM_TIMEOUT_MS
+        value: 15000
+      - key: LLM_MAX_RETRIES
+        value: 2
+      - key: LOG_LEVEL
+        value: info

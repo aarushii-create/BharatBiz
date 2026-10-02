@@ -5,13 +5,13 @@ Run command: `npm test`
 Latest local run:
 
 - Tests: 136 passed, 0 failed
-- Total suite duration: 11666.92 ms
-- Unknown tool dispatch: 0.09 ms
-- Malformed query orchestration: 0.05 ms
-- Bhashini timeout abort: 60.81 ms
+- Total suite duration: 1149.06 ms
+- Unknown tool dispatch: 0.06 ms
+- Malformed query orchestration: 0.04 ms
+- Bhashini timeout abort: 62.12 ms
 - Voice fallback: 0.02 ms
 - Missing-product database lookup: 0.01 ms
-- Approved purchase-order issuance: 0.08 ms
+- Approved purchase-order issuance: 0.06 ms
 - Product API integration: 7 checks passed
 - Purchase CSV import schema: 1 check passed
 

@@ -1,8 +1,12 @@
+import 'dotenv/config';
 import express, { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import rateLimit from 'express-rate-limit';
+import { invokeInvestigation } from '../src/agents';
+import { calculate_profit_change } from '../src/services/businessAnalytics';
 
 type DataKind = 'sales' | 'inventory' | 'expenses' | 'purchases' | 'invoices';
 type RecommendationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -45,8 +49,20 @@ interface Store {
 
 export const app = express();
 const port = Number(process.env.PORT || 4000);
-const dataPath = process.env.BB_DATA_PATH || path.resolve(process.cwd(), 'server/data.json');
+const host = process.env.HOST || '0.0.0.0';
+const baseDataDir = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
+const dataPath = process.env.BB_DATA_PATH || path.resolve(baseDataDir, 'bharatbiz-data.json');
 const sessions = new Map<string, string>();
+const isProduction = (process.env.NODE_ENV || 'development').toLowerCase() === 'production';
+const allowedOrigins = new Set([
+  process.env.CORS_ORIGIN,
+  process.env.FRONTEND_URL,
+  process.env.APP_URL,
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+].filter((value): value is string => Boolean(value)));
 
 function emptyStore(): Store {
   return { users: [], businesses: [], data: {}, recommendations: [], purchaseOrders: [], auditLogs: [] };
@@ -121,7 +137,12 @@ function requireUser(req: Request, res: Response, next: NextFunction): void {
 function setSession(res: Response, userId: string): void {
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, userId);
-  res.cookie('bb_session', token, { httpOnly: true, sameSite: 'lax' });
+  res.cookie('bb_session', token, {
+    httpOnly: true,
+    sameSite: (process.env.COOKIE_SAME_SITE as 'lax' | 'strict' | 'none') || 'lax',
+    secure: isProduction || process.env.COOKIE_SECURE === 'true',
+    maxAge: 1000 * 60 * 60 * 24 * 7,
+  });
 }
 
 function monthKey(value: unknown): string | undefined {
@@ -132,51 +153,135 @@ function total(records: any[], field: string): number {
   return records.reduce((result, record) => result + (typeof record[field] === 'number' ? record[field] : 0), 0);
 }
 
-function analyze(data: Record<DataKind, any[]>, query: string, language: string): Record<string, unknown> {
+function analyze(data: Record<DataKind, any[]>, query: string, language: string, businessId = 'biz-murugan-01'): Record<string, unknown> {
   const normalized = query.toLowerCase();
-  const months = [...new Set(data.sales.map((sale) => monthKey(sale.date)).filter(Boolean))].sort().reverse() as string[];
-  const currentMonth = months[0];
-  const previousMonth = months[1];
+  const businessInvestigation = invokeInvestigation(query, language as any, businessId);
+
+  const currentMonth = [...new Set(data.sales.map((sale) => monthKey(sale.date)).filter(Boolean))].sort().reverse()[0] as string | undefined;
+  const previousMonth = [...new Set(data.sales.map((sale) => monthKey(sale.date)).filter(Boolean))].sort().reverse()[1] as string | undefined;
   const currentSales = data.sales.filter((sale) => monthKey(sale.date) === currentMonth);
   const previousSales = data.sales.filter((sale) => monthKey(sale.date) === previousMonth);
-  const expensesFor = (month: string | undefined) => data.expenses.filter((expense) => monthKey(expense.date) === month || (!expense.date && expense.period === (month === currentMonth ? 'current' : 'previous')));
-  const currentExpenses = expensesFor(currentMonth);
-  const previousExpenses = expensesFor(previousMonth);
-  const currentRevenue = total(currentSales, 'totalRevenue');
-  const previousRevenue = total(previousSales, 'totalRevenue');
-  const currentExpenseTotal = total(currentExpenses, 'amount');
-  const previousExpenseTotal = total(previousExpenses, 'amount');
+  const currentExpenses = data.expenses.filter((expense) => monthKey(expense.date) === currentMonth || (!expense.date && expense.period === 'current'));
+  const previousExpenses = data.expenses.filter((expense) => monthKey(expense.date) === previousMonth || (!expense.date && expense.period === 'previous'));
+
+  const currentRevenue = currentSales.reduce((sum, sale) => sum + (typeof sale.totalRevenue === 'number' ? sale.totalRevenue : 0), 0);
+  const previousRevenue = previousSales.reduce((sum, sale) => sum + (typeof sale.totalRevenue === 'number' ? sale.totalRevenue : 0), 0);
+  const currentExpenseTotal = currentExpenses.reduce((sum, expense) => sum + (typeof expense.amount === 'number' ? expense.amount : 0), 0);
+  const previousExpenseTotal = previousExpenses.reduce((sum, expense) => sum + (typeof expense.amount === 'number' ? expense.amount : 0), 0);
+  const currentProfit = currentRevenue - currentExpenseTotal;
+  const previousProfit = previousRevenue - previousExpenseTotal;
+  const profitDelta = currentProfit - previousProfit;
+  const revenueDelta = currentRevenue - previousRevenue;
+  const expenseDelta = currentExpenseTotal - previousExpenseTotal;
+
+  const asksInventory = /reorder|stock|inventory|slow|selling|product|சரக்கு|கையிருப்பு|ஆர்டர்|स्टॉक|खरीद|ఆర్డర్/.test(normalized);
+  const asksProfit = /profit|revenue|expense|cost|money|லாபம்|செலவு|मुनाफ़ा|खर्च|मुनाफा|లాభం/.test(normalized);
+
   const facts = {
     currentRevenue,
     previousRevenue,
-    revenueDelta: currentRevenue - previousRevenue,
+    revenueDelta,
     currentExpenses: currentExpenseTotal,
     previousExpenses: previousExpenseTotal,
-    expenseDelta: currentExpenseTotal - previousExpenseTotal,
-    currentProfit: currentRevenue - currentExpenseTotal,
-    previousProfit: previousRevenue - previousExpenseTotal,
-    profitDelta: currentRevenue - currentExpenseTotal - (previousRevenue - previousExpenseTotal),
+    expenseDelta,
+    currentProfit,
+    previousProfit,
+    profitDelta,
   };
+
   const evidence = [
-    { type: 'FACT', label: 'Current revenue', value: currentRevenue, source: 'sales' },
-    { type: 'FACT', label: 'Previous revenue', value: previousRevenue, source: 'sales' },
-    { type: 'CALCULATION', label: 'Current profit', value: facts.currentProfit, formula: 'revenue - expenses', source: 'sales + expenses' },
-    { type: 'CALCULATION', label: 'Previous profit', value: facts.previousProfit, formula: 'revenue - expenses', source: 'sales + expenses' },
+    { type: 'FACT', label: 'Revenue change', value: revenueDelta, formula: 'currentRevenue - previousRevenue', source: 'sales ledger' },
+    { type: 'FACT', label: 'Expense change', value: expenseDelta, formula: 'currentExpenses - previousExpenses', source: 'expense ledger' },
+    { type: 'CALCULATION', label: 'Profit change', value: profitDelta, formula: 'currentProfit - previousProfit', source: 'deterministic analytics' },
   ];
-  const asksInventory = /reorder|stock|inventory|slow|selling|product|சரக்கு|கையிருப்பு|ஆர்டர்|स्टॉक|खरीद|ఆర్డర్/.test(normalized);
-  const asksProfit = /profit|revenue|expense|cost|money|லாபம்|செலவு|முனாபா|खर्च|मुनाफ़ा|లాభం/.test(normalized);
-  if (asksProfit && (currentSales.length === 0 || currentExpenses.length === 0)) return { query, language, intent: 'insufficient_data', facts: {}, evidence: [], explanation: 'There is not enough sales and expense data to calculate profit yet.', recommendation: 'Upload sales and expense data before asking for a profit comparison.' };
-  if (asksInventory && data.inventory.length === 0) return { query, language, intent: 'insufficient_data', facts: {}, evidence: [], explanation: 'There is no inventory data for this business yet.', recommendation: 'Upload inventory data before asking for stock or reorder recommendations.' };
-  const slow = data.inventory.map((item) => ({ ...item, drop: item.previousSalesVelocityUnitsPerWeek > 0 ? (item.previousSalesVelocityUnitsPerWeek - item.salesVelocityUnitsPerWeek) / item.previousSalesVelocityUnitsPerWeek : 0 })).filter((item) => item.drop >= 0.25).sort((a, b) => b.drop - a.drop)[0];
-  const contributors = ['Purchase Cost', 'Wastage', 'Delivery Expense'].map((category) => ({ category, delta: total(currentExpenses.filter((item) => item.category === category), 'amount') - total(previousExpenses.filter((item) => item.category === category), 'amount') })).filter((item) => item.delta !== 0);
-  const explanation = asksProfit ? `Profit changed by ₹${Math.abs(facts.profitDelta).toLocaleString('en-IN')} compared with the previous period. ${contributors.length ? `Recorded expense changes: ${contributors.map((item) => `${item.category} ₹${item.delta.toLocaleString('en-IN')}`).join(', ')}.` : 'No categorized expense changes were found.'}` : slow ? `${slow.productName} has a measured sales-velocity decline of ${Math.round(slow.drop * 100)}%.` : 'I found business data, but need a more specific question about sales, expenses, profit, or inventory.';
-  const recommendation = slow ? `Consider reducing the next purchase quantity for ${slow.productName} based on its measured velocity decline.` : 'No action recommendation is available from the current data.';
-  const action = slow ? { type: 'GENERATE_PURCHASE_ORDER', productId: slow.productId, productName: slow.productName, quantity: Math.max(0, Math.round((slow.standardOrderQuantity || 0) * (1 - slow.drop * 0.5))), requiresApproval: true } : undefined;
-  return { query, language, intent: asksProfit ? 'profit_analysis' : 'inventory_analysis', facts, evidence: [...evidence, ...contributors.map((item) => ({ type: 'FACT', label: item.category, value: item.delta, source: 'expenses' }))], explanation, recommendation, action };
+
+  const slowInventory = data.inventory
+    .map((item) => ({ ...item, drop: item.previousSalesVelocityUnitsPerWeek > 0 ? ((item.previousSalesVelocityUnitsPerWeek - item.salesVelocityUnitsPerWeek) / item.previousSalesVelocityUnitsPerWeek) : 0 }))
+    .filter((item) => item.drop >= 0.25)
+    .sort((a, b) => b.drop - a.drop)[0];
+
+  const action = slowInventory && data.inventory.length > 0
+    ? {
+        type: 'GENERATE_PURCHASE_ORDER',
+        productId: slowInventory.productId,
+        productName: slowInventory.productName,
+        quantity: Math.max(0, Math.round((slowInventory.standardOrderQuantity || 0) * (1 - Math.min(0.5, slowInventory.drop * 0.5)))),
+        requiresApproval: true,
+      }
+    : undefined;
+
+  const recommendationText = action
+    ? `Consider reducing the next purchase quantity for ${action.productName} based on measured velocity decline.`
+    : 'No action recommendation is available from the current data.';
+
+  return {
+    query,
+    language,
+    intent: asksProfit ? 'profit_analysis' : asksInventory ? 'inventory_analysis' : 'general_business_health',
+    facts,
+    evidence,
+    agentTrace: businessInvestigation.activity,
+    evidenceQuality: businessInvestigation.evidenceQuality,
+    decisionRoom: {
+      summary: profitDelta < 0 ? `Profit was down by ₹${Math.abs(profitDelta).toLocaleString('en-IN')}.` : 'The current business picture is stable.',
+      evidence: [
+        `Revenue delta: ₹${revenueDelta.toLocaleString('en-IN')}`,
+        `Expense delta: ₹${expenseDelta.toLocaleString('en-IN')}`,
+        `Profit delta: ₹${profitDelta.toLocaleString('en-IN')}`,
+      ],
+      recommendation: recommendationText,
+      approvalRequired: !!action?.requiresApproval,
+    },
+    explanation: asksProfit
+      ? `Profit changed by ₹${Math.abs(profitDelta).toLocaleString('en-IN')} compared with the previous period. The current ledger shows revenue of ₹${currentRevenue.toLocaleString('en-IN')} and expenses of ₹${currentExpenseTotal.toLocaleString('en-IN')}.`
+      : slowInventory
+        ? `${slowInventory.productName} is moving slower than its prior baseline and merits review.`
+        : 'The business data is available, but there is not yet enough actionable inventory evidence for a purchase recommendation.',
+    recommendation: recommendationText,
+    action,
+  };
 }
 
-app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
+app.use((req, res, next) => {
+  const timeoutMs = Number(process.env.REQUEST_TIMEOUT_MS || 25000);
+  req.setTimeout(timeoutMs);
+  res.setTimeout(timeoutMs, () => {
+    if (!res.headersSent) {
+      res.status(408).json({ error: 'Request timed out.' });
+    }
+  });
+  next();
+});
+
+app.use(rateLimit({
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
+  max: Number(process.env.RATE_LIMIT_MAX_REQUESTS || 120),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down and try again.' },
+}));
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('CORS policy disallows this origin.'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+}));
 app.use(express.json({ limit: '2mb' }));
+
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', service: 'bharatbiz-ai', timestamp: new Date().toISOString(), uptime: process.uptime() });
+});
+
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', service: 'bharatbiz-ai', timestamp: new Date().toISOString(), businessStore: 'active', mode: process.env.NODE_ENV || 'development' });
+});
 
 app.post('/api/auth/signup', (req, res) => {
   if (typeof req.body?.email !== 'string' || !/^\S+@\S+\.\S+$/.test(req.body.email) || typeof req.body?.password !== 'string' || req.body.password.length < 8) return res.status(400).json({ error: 'Use a valid email and a password with at least 8 characters.' });
@@ -201,7 +306,10 @@ app.get('/api/auth/me', requireUser, (req, res) => res.json({ user: safeUser(res
 
 app.get('/api/dashboard', requireUser, (req, res) => {
   const data = businessData(res.locals.user.businessId); const revenue = total(data.sales, 'totalRevenue'); const expenses = total(data.expenses, 'amount');
-  res.json({ hasData: data.sales.length > 0 || data.inventory.length > 0 || data.expenses.length > 0, metrics: { revenue: data.sales.length ? revenue : null, expenses: data.expenses.length ? expenses : null, profit: data.sales.length || data.expenses.length ? revenue - expenses : null, inventoryValue: data.inventory.length ? data.inventory.reduce((result, item) => result + (item.currentStock || 0) * (item.purchasePrice || 0), 0) : null }, counts: Object.fromEntries(Object.entries(data).map(([key, value]) => [key, value.length])) });
+  const monthKeys = [...new Set([...data.sales.map((sale) => monthKey(sale.date)), ...data.expenses.map((expense) => monthKey(expense.date))].filter(Boolean))].sort() as string[];
+  const trend = monthKeys.map((month) => { const monthSales = data.sales.filter((sale) => monthKey(sale.date) === month); const monthExpenses = data.expenses.filter((expense) => monthKey(expense.date) === month); const monthRevenue = total(monthSales, 'totalRevenue'); const monthExpenseTotal = total(monthExpenses, 'amount'); return { month, revenue: monthRevenue, expenses: monthExpenseTotal, profit: monthRevenue - monthExpenseTotal }; });
+  const slowProducts = data.inventory.filter((item) => item.previousSalesVelocityUnitsPerWeek > 0 && item.salesVelocityUnitsPerWeek < item.previousSalesVelocityUnitsPerWeek).map((item) => ({ productName: item.productName, dropPercent: Math.round(((item.previousSalesVelocityUnitsPerWeek - item.salesVelocityUnitsPerWeek) / item.previousSalesVelocityUnitsPerWeek) * 100), currentStock: item.currentStock })).sort((a, b) => b.dropPercent - a.dropPercent).slice(0, 5);
+  res.json({ hasData: data.sales.length > 0 || data.inventory.length > 0 || data.expenses.length > 0, metrics: { revenue: data.sales.length ? revenue : null, expenses: data.expenses.length ? expenses : null, profit: data.sales.length || data.expenses.length ? revenue - expenses : null, inventoryValue: data.inventory.length ? data.inventory.reduce((result, item) => result + (item.currentStock || 0) * (item.purchasePrice || 0), 0) : null }, counts: Object.fromEntries(Object.entries(data).map(([key, value]) => [key, value.length])), trend, slowProducts });
 });
 
 app.get('/api/data', requireUser, (req, res) => res.json(businessData(res.locals.user.businessId)));
@@ -242,5 +350,25 @@ app.post('/api/recommendations/:recommendationId/reject', requireUser, (req, res
   recommendation.status = 'REJECTED'; store.auditLogs.push({ id: newId('audit'), userId: res.locals.user.id, businessId: res.locals.user.businessId, createdAt: new Date().toISOString(), query: recommendation.query, intent: recommendation.intent, recommendation: recommendation.recommendation, approval: 'REJECTED', reason: req.body?.reason || 'Rejected by user' }); writeStore(); res.json({ recommendation });
 });
 
-app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => { console.error(error); res.status(500).json({ error: 'The request could not be completed.' }); });
-if (process.env.NODE_ENV !== 'test') app.listen(port, () => console.log(`BharatBiz API listening on http://localhost:${port}`));
+const distPath = path.resolve(process.cwd(), 'dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get(/^(?!\/api\/).+/, (_req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
+
+app.use((req, res) => {
+  res.status(404).json({ error: `Route not found: ${req.originalUrl}` });
+});
+
+app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[unhandled-error]', error);
+  const statusCode = res.statusCode && res.statusCode >= 400 ? res.statusCode : 500;
+  res.status(statusCode).json({ error: 'The request could not be completed.' });
+});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(port, host, () => {
+    console.log(`BharatBiz API listening on http://${host}:${port}`);
+  });
+}

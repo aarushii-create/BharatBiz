@@ -4,13 +4,19 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently --kill-others \"npm run server\" \"vite --port=3000 --host=0.0.0.0\"",
+    "dev:clean": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-NetTCPConnection -LocalPort 3000,4000 -ErrorAction SilentlyContinue | ForEach-Object { if ($_.OwningProcess) { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }\"",
+    "dev": "npm run dev:clean && concurrently --kill-others \"npm run server\" \"vite --port=3000 --host=0.0.0.0\"",
     "server": "tsx server/index.ts",
     "build": "vite build",
+    "build:prod": "npm run lint && vite build --mode production",
     "preview": "vite preview",
+    "start:prod": "tsx server/index.ts",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx src/tests/runTests.ts"
+    "test": "tsx src/tests/runTests.ts",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:seed:test-data": "tsx scripts/seed-test-data.ts",
+    "db:seed:demo": "tsx scripts/seed-demo-data.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -19,6 +25,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.7.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",

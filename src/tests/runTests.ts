@@ -6,6 +6,7 @@ import { runUploadUnitTests } from './upload.test';
 import { runApprovalUnitTests } from './approval.test';
 import { runReliabilityAndHardeningTests } from './reliabilityAndHardening.test';
 import { runProductFlowTests, validatePurchaseCsvFixture } from './productFlow.test';
+import { runAgentFrameworkTests } from './agentFramework.test';
 
 async function main() {
   const overallStartTime = performance.now();
@@ -38,8 +39,25 @@ async function main() {
     }
   }
 
-  // 2. Run Orchestrator & Tool Calling Tests
-  console.log('\n\n--- SECTION 2: AI ORCHESTRATOR & TOOL CALLING TESTS ---');
+  // 2. Run Agent Framework Tests
+  console.log('\n\n--- SECTION 2: MULTI-AGENT FRAMEWORK TESTS ---');
+  const agentSuite = runAgentFrameworkTests();
+
+  currentSuite = '';
+  for (const test of agentSuite.results) {
+    if (test.suite !== currentSuite) {
+      currentSuite = test.suite;
+      console.log(`\n🤖 ${currentSuite.toUpperCase()}`);
+    }
+    const symbol = test.passed ? '✓ PASS' : '✗ FAIL';
+    console.log(`  ${symbol}: ${test.name}`);
+    if (!test.passed) {
+      console.log(`     Error: ${test.error}`);
+    }
+  }
+
+  // 3. Run Orchestrator & Tool Calling Tests
+  console.log('\n\n--- SECTION 3: AI ORCHESTRATOR & TOOL CALLING TESTS ---');
   const orchestratorSuite = runOrchestratorUnitTests();
 
   currentSuite = '';
@@ -55,8 +73,8 @@ async function main() {
     }
   }
 
-  // 3. Run Evidence Engine Tests
-  console.log('\n\n--- SECTION 3: EVIDENCE ENGINE & TRACEABILITY TESTS ---');
+  // 4. Run Evidence Engine Tests
+  console.log('\n\n--- SECTION 4: EVIDENCE ENGINE & TRACEABILITY TESTS ---');
   const evidenceSuite = runEvidenceUnitTests();
 
   currentSuite = '';
@@ -72,8 +90,8 @@ async function main() {
     }
   }
 
-  // 4. Run Multilingual Voice System Tests
-  console.log('\n\n--- SECTION 4: MULTILINGUAL VOICE SYSTEM TESTS ---');
+  // 5. Run Multilingual Voice System Tests
+  console.log('\n\n--- SECTION 5: MULTILINGUAL VOICE SYSTEM TESTS ---');
   const voiceSuite = await runVoiceUnitTests();
 
   currentSuite = '';
@@ -89,8 +107,8 @@ async function main() {
     }
   }
 
-  // 5. Run Data Upload & Multimodal OCR Tests
-  console.log('\n\n--- SECTION 5: DATA UPLOAD & MULTIMODAL INPUT TESTS ---');
+  // 6. Run Data Upload & Multimodal OCR Tests
+  console.log('\n\n--- SECTION 6: DATA UPLOAD & MULTIMODAL INPUT TESTS ---');
   const uploadSuite = await runUploadUnitTests();
 
   currentSuite = '';
@@ -106,8 +124,8 @@ async function main() {
     }
   }
 
-  // 6. Run Recommendation & Approval Engine Tests
-  console.log('\n\n--- SECTION 6: RECOMMENDATION & APPROVAL TESTS ---');
+  // 7. Run Recommendation & Approval Engine Tests
+  console.log('\n\n--- SECTION 7: RECOMMENDATION & APPROVAL TESTS ---');
   const approvalSuite = runApprovalUnitTests();
 
   currentSuite = '';
@@ -123,8 +141,8 @@ async function main() {
     }
   }
 
-  // 7. Run Phase 9: Reliability, Hardening & Edge Cases
-  console.log('\n\n--- SECTION 7: RELIABILITY, HARDENING & MEASURED METRICS ---');
+  // 8. Run Phase 9: Reliability, Hardening & Edge Cases
+  console.log('\n\n--- SECTION 8: RELIABILITY, HARDENING & MEASURED METRICS ---');
   const reliabilitySuite = await runReliabilityAndHardeningTests();
 
   currentSuite = '';
@@ -140,7 +158,7 @@ async function main() {
     }
   }
 
-  console.log('\n\n--- SECTION 8: PRODUCT FLOW INTEGRATION TESTS ---');
+  console.log('\n\n--- SECTION 9: PRODUCT FLOW INTEGRATION TESTS ---');
   const productSuite = await runProductFlowTests();
   const purchaseFixture = validatePurchaseCsvFixture();
   productSuite.results.push({ suite: 'Product Data Import', name: 'Purchase CSV validates with real schema', actual: purchaseFixture.validRows.length, expected: 1, passed: purchaseFixture.success && purchaseFixture.validRows.length === 1, error: purchaseFixture.success ? undefined : purchaseFixture.errors.map((error) => error.message).join('; ') });
@@ -172,6 +190,7 @@ async function main() {
 
   const grandTotal =
     dataLayerSuite.total +
+    agentSuite.total +
     orchestratorSuite.total +
     evidenceSuite.total +
     voiceSuite.total +
@@ -181,6 +200,7 @@ async function main() {
     productSuite.total;
   const grandPassed =
     dataLayerSuite.passed +
+    agentSuite.passed +
     orchestratorSuite.passed +
     evidenceSuite.passed +
     voiceSuite.passed +
@@ -190,6 +210,7 @@ async function main() {
     productSuite.passed;
   const grandFailed =
     dataLayerSuite.failed +
+    agentSuite.failed +
     orchestratorSuite.failed +
     evidenceSuite.failed +
     voiceSuite.failed +

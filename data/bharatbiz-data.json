@@ -1,0 +1,51 @@
+{
+  "users": [
+    {
+      "id": "usr_29c1adc6-a694-4b38-9240-439b25c2a050",
+      "name": "Tester",
+      "email": "test@example.com",
+      "passwordHash": "b87a50e8e9e9dcf3a36a98d08d707cb4:4c042d5663fd4fb8f8d017c1aee4f861c44696bf66d853b49da30ce1ec619e2f9afd6d99fba2873477e36529c7626cb4147e99f3d376a81b5fda720f509e2a97",
+      "businessId": "biz_c3dc82cf-5d20-4644-82fb-3b8e27e8df30"
+    },
+    {
+      "id": "usr_894f4484-1358-49f4-aaa1-32435c30c630",
+      "name": "arushi",
+      "email": "aarushi@google.com",
+      "passwordHash": "e297ff9d76a36e214445ad1ac4458c2d:9bd27d7bd75b579f7e3e008435c18fcbc1e0321b787ec09d290a8ff9853a6ebf3f6acbda98b1121c1dde68d37356fce93939167990cbd6351a9074dd8dbd9866",
+      "businessId": "biz_97cc5102-920c-4c06-9d7b-486bae6ce88e"
+    }
+  ],
+  "businesses": [
+    {
+      "id": "biz_c3dc82cf-5d20-4644-82fb-3b8e27e8df30",
+      "name": "Dev Biz",
+      "ownerId": "usr_29c1adc6-a694-4b38-9240-439b25c2a050",
+      "createdAt": "2026-10-02T13:58:39.131Z"
+    },
+    {
+      "id": "biz_97cc5102-920c-4c06-9d7b-486bae6ce88e",
+      "name": "as",
+      "ownerId": "usr_894f4484-1358-49f4-aaa1-32435c30c630",
+      "createdAt": "2026-10-02T14:09:32.445Z"
+    }
+  ],
+  "data": {
+    "biz_c3dc82cf-5d20-4644-82fb-3b8e27e8df30": {
+      "sales": [],
+      "inventory": [],
+      "expenses": [],
+      "purchases": [],
+      "invoices": []
+    },
+    "biz_97cc5102-920c-4c06-9d7b-486bae6ce88e": {
+      "sales": [],
+      "inventory": [],
+      "expenses": [],
+      "purchases": [],
+      "invoices": []
+    }
+  },
+  "recommendations": [],
+  "purchaseOrders": [],
+  "auditLogs": []
+}
